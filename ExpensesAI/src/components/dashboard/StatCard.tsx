@@ -15,17 +15,17 @@ interface StatCardProps {
 }
 
 const variantStyles = {
-  default: 'bg-card',
-  primary: 'bg-primary text-primary-foreground',
-  warning: 'gradient-warning text-warning-foreground',
-  success: 'bg-success text-success-foreground',
+  default: 'bg-white/10 backdrop-blur-md border border-white/20 text-white hover:bg-white/15 hover:border-white/30',
+  primary: 'bg-gradient-to-br from-purple-500/30 to-cyan-500/30 backdrop-blur-md border border-cyan-400/30 text-white',
+  warning: 'bg-gradient-to-br from-orange-500/30 to-red-500/30 backdrop-blur-md border border-orange-400/30 text-white',
+  success: 'bg-gradient-to-br from-green-500/30 to-emerald-500/30 backdrop-blur-md border border-green-400/30 text-white',
 };
 
 const iconStyles = {
-  default: 'bg-primary/10 text-primary',
-  primary: 'bg-primary-foreground/20 text-primary-foreground',
-  warning: 'bg-warning-foreground/20 text-warning-foreground',
-  success: 'bg-success-foreground/20 text-success-foreground',
+  default: 'bg-cyan-500/30 text-cyan-300 border border-cyan-400/30',
+  primary: 'bg-white/20 text-white border border-white/30',
+  warning: 'bg-orange-500/30 text-orange-200 border border-orange-400/30',
+  success: 'bg-green-500/30 text-green-200 border border-green-400/30',
 };
 
 export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 'default' }: StatCardProps) {
@@ -35,7 +35,7 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ y: -4, transition: { duration: 0.2 } }}
       className={cn(
-        'relative overflow-hidden rounded-xl p-6 shadow-card transition-shadow hover:shadow-card-hover',
+        'relative overflow-hidden rounded-2xl p-6 shadow-2xl transition-all duration-300',
         variantStyles[variant]
       )}
     >
@@ -43,7 +43,7 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 
         <div className="space-y-2">
           <p className={cn(
             'text-sm font-medium',
-            variant === 'default' ? 'text-muted-foreground' : 'opacity-90'
+            variant === 'default' ? 'text-gray-300' : 'text-gray-200'
           )}>
             {title}
           </p>
@@ -51,7 +51,7 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 
           {subtitle && (
             <p className={cn(
               'text-xs',
-              variant === 'default' ? 'text-muted-foreground' : 'opacity-80'
+              variant === 'default' ? 'text-gray-400' : 'text-gray-300'
             )}>
               {subtitle}
             </p>
@@ -59,7 +59,7 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 
           {trend && (
             <div className={cn(
               'inline-flex items-center gap-1 text-xs font-medium',
-              trend.isPositive ? 'text-success' : 'text-destructive'
+              trend.isPositive ? 'text-green-300' : 'text-red-300'
             )}>
               <span>{trend.isPositive ? '↑' : '↓'}</span>
               <span>{Math.abs(trend.value)}% from last month</span>
@@ -67,7 +67,7 @@ export function StatCard({ title, value, subtitle, icon: Icon, trend, variant = 
           )}
         </div>
         <div className={cn(
-          'rounded-xl p-3',
+          'rounded-xl p-3 border',
           iconStyles[variant]
         )}>
           <Icon className="h-6 w-6" />

@@ -13,9 +13,9 @@ export function SpendingChart({ data }: SpendingChartProps) {
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
-      className="rounded-xl bg-card p-6 shadow-card"
+      className="rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 p-6 shadow-lg hover:bg-white/15 transition-all"
     >
-      <h3 className="mb-4 text-lg font-semibold text-foreground font-display">Spending by Category</h3>
+      <h3 className="mb-4 text-lg font-semibold text-white font-display">Spending by Category</h3>
       
       <div className="flex items-center gap-6">
         <div className="relative h-48 w-48 shrink-0">
@@ -41,17 +41,18 @@ export function SpendingChart({ data }: SpendingChartProps) {
               <Tooltip 
                 formatter={(value: number) => [`₹${value.toFixed(2)}`, 'Amount']}
                 contentStyle={{
-                  backgroundColor: 'hsl(var(--card))',
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: '8px',
+                  backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  borderRadius: '12px',
                   padding: '8px 12px',
+                  color: 'white',
                 }}
               />
             </PieChart>
           </ResponsiveContainer>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <p className="text-2xl font-bold text-foreground font-display">₹{total.toFixed(0)}</p>
-            <p className="text-xs text-muted-foreground">This Week</p>
+            <p className="text-2xl font-bold text-white font-display">₹{total.toFixed(0)}</p>
+            <p className="text-xs text-gray-400">This Week</p>
           </div>
         </div>
         
@@ -63,9 +64,9 @@ export function SpendingChart({ data }: SpendingChartProps) {
                 style={{ backgroundColor: item.color }}
               />
               <span className="text-lg">{categoryIcons[item.category]}</span>
-              <span className="flex-1 text-sm capitalize text-foreground">{item.category}</span>
-              <span className="text-sm font-medium text-foreground">₹{item.amount.toFixed(0)}</span>
-              <span className="text-xs text-muted-foreground w-10 text-right">{item.percentage}%</span>
+              <span className="flex-1 text-sm capitalize text-gray-300">{item.category}</span>
+              <span className="text-sm font-medium text-white">₹{item.amount.toFixed(0)}</span>
+              <span className="text-xs text-gray-400 w-10 text-right">{item.percentage}%</span>
             </div>
           ))}
         </div>

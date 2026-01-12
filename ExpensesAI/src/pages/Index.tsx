@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Wallet, TrendingDown, AlertTriangle, Target, BadgeCheck } from 'lucide-react';
+import { Plus, Wallet, TrendingDown, AlertTriangle, Target, BadgeCheck, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Header } from '@/components/layout/Header';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -9,9 +9,9 @@ import { ExpenseList } from '@/components/dashboard/ExpenseList';
 import { SpendingChart } from '@/components/dashboard/SpendingChart';
 import { WeeklyTrendChart } from '@/components/dashboard/WeeklyTrendChart';
 import { AddExpenseModal } from '@/components/dashboard/AddExpenseModal';
-// STRICT MODE: no new modals for Saved; templates-only will be handled later within AddExpenseModal
 import { AddSavingModal } from '@/components/dashboard/AddSavingModal';
-import { 
+import { CSVUpload } from '@/components/CSVUpload';
+import {
   Category,
   Expense,
   HabitAlert,
@@ -31,10 +31,13 @@ import {
   type AnalysisResult,
 } from '@/services/ai';
 import { useAuth } from '@/context/AuthContext';
+import { getExpenses, addExpense, deleteExpense } from '@/services/database';
 
 const Index = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSavedOpen, setIsSavedOpen] = useState(false);
+  const [isCSVOpen, setIsCSVOpen] = useState(false);
+  const [isGlobalLoading, setIsGlobalLoading] = useState(false);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [alerts, setAlerts] = useState<HabitAlert[]>([]);
   const [savedSummary, setSavedSummary] = useState<SavingsSummary>({ total: 0, prevented: 0, reduced: 0, optimized: 0 });
@@ -44,41 +47,49 @@ const Index = () => {
   const [botMessages, setBotMessages] = useState<Array<{ role: 'ai' | 'user'; text: string }>>([]);
   const [lastAnalysis, setLastAnalysis] = useState<AnalysisResult | null>(null);
   const { user } = useAuth();
+  const loaderTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const expensesKey = user?.email ? `expenses:${user.email.toLowerCase()}` : 'expenses:guest';
   const userKey = user?.email ? user.email.toLowerCase() : 'guest';
 
+  // Helper function to start global loading with exactly 25 second duration
+  const startGlobalLoader = () => {
+    // Clear any existing timer
+    if (loaderTimerRef.current) {
+      clearTimeout(loaderTimerRef.current);
+    }
+    // Set loader immediately
+    setIsGlobalLoading(true);
+    // Set timer to hide after exactly 25 seconds
+    loaderTimerRef.current = setTimeout(() => {
+      setIsGlobalLoading(false);
+      loaderTimerRef.current = null;
+    }, 25000);
+  };
+
+  // Cleanup timer on unmount
   useEffect(() => {
-    try {
-      const rawExpenses = localStorage.getItem(expensesKey);
-      if (rawExpenses) {
-        const parsed: Expense[] = JSON.parse(rawExpenses).map((e: any) => {
-          const date = new Date(e.date);
-          return {
-            ...e,
-            date,
-            source: e.source ?? 'MANUAL',
-          } as Expense;
-        });
-        setExpenses(parsed);
-        const computedAlerts = recomputeAlerts(parsed);
+    return () => {
+      if (loaderTimerRef.current) {
+        clearTimeout(loaderTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const loadExpenses = async () => {
+      try {
+        const expenses = await getExpenses();
+        setExpenses(expenses);
+        const computedAlerts = recomputeAlerts(expenses);
         setAlerts(computedAlerts);
-      } else {
+      } catch (error) {
+        console.error('Failed to load expenses:', error);
         setExpenses([]);
         setAlerts([]);
       }
-    } catch {
-      setExpenses([]);
-      setAlerts([]);
-    }
-  }, [expensesKey]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(expensesKey, JSON.stringify(expenses));
-    } catch {}
-  }, [expenses, expensesKey]);
-  // Do not persist alerts; they should reset on restart
+    };
+    loadExpenses();
+  }, []);
 
   useEffect(() => {
     const { summary } = reconcileSavingsLedger({ userKey, expenses });
@@ -142,8 +153,12 @@ const Index = () => {
     return order.map((day) => ({ day, amount: totals[day] }));
   })();
 
-  const handleAddExpense = (newExpense: { description: string; amount: number; category: Category }) => {
-    const attemptId = Date.now().toString();
+  const handleAddExpense = async (newExpense: { description: string; amount: number; category: Category }) => {
+    // Close modal immediately
+    setIsModalOpen(false);
+    // Show loading overlay
+    setIsGlobalLoading(true);
+
     const now = new Date();
 
     let finalAmount = newExpense.amount;
@@ -158,37 +173,19 @@ const Index = () => {
           .reduce((s, e) => s + e.amount, 0);
         const remaining = Math.max(0, cap - monthTotal);
         if (remaining <= 0) {
-          recordOptimizedSaving({
-            userKey,
-            expenseId: attemptId,
-            category: newExpense.category,
-            amount: newExpense.amount,
-            reason: 'Overspend blocked by savings cap',
-            now,
-          });
-          const { summary } = reconcileSavingsLedger({ userKey, expenses, now });
-          setSavedSummary(summary);
           toast('Spending capped', { description: `This ${newExpense.category} expense was blocked. ₹${newExpense.amount.toFixed(0)} counted as Saved.` });
+          setIsGlobalLoading(false);
           return;
         }
         if (newExpense.amount > remaining) {
           const blocked = newExpense.amount - remaining;
           finalAmount = remaining;
-          recordOptimizedSaving({
-            userKey,
-            expenseId: attemptId,
-            category: newExpense.category,
-            amount: blocked,
-            reason: 'Overspend reduced by savings cap',
-            now,
-          });
           toast('Spending optimized', { description: `Reduced by ₹${blocked.toFixed(0)} and counted as Saved.` });
         }
       }
     }
 
-    const expenseBase: Expense = {
-      id: attemptId,
+    const expenseBase: Omit<Expense, 'id'> = {
       description: newExpense.description,
       amount: finalAmount,
       category: newExpense.category,
@@ -196,19 +193,30 @@ const Index = () => {
       isImpulse: false,
       source: 'MANUAL',
     };
-    const { flags } = classifyExpense(expenseBase, expenses);
-    const expense: Expense = { ...expenseBase, isImpulse: flags.impulse };
-    const nextExpenses = [expense, ...expenses];
-    setExpenses(nextExpenses);
-    const nextAlerts = recomputeAlerts(nextExpenses);
-    setAlerts(nextAlerts);
-    const { summary } = reconcileSavingsLedger({ userKey, expenses: nextExpenses, now });
-    setSavedSummary(summary);
-    // Trigger background analysis update
-    requestGeminiAnalysis(nextExpenses).then(setLastAnalysis).catch(() => {});
-    toast.success('Expense added', {
-      description: `${expense.description} - ₹${expense.amount.toFixed(0)} (${expense.category})`,
-    });
+    const { flags } = classifyExpense(expenseBase as Expense, expenses);
+    const expenseToAdd = { ...expenseBase, isImpulse: flags.impulse };
+
+    try {
+      const id = await addExpense(expenseToAdd);
+      const newExpenseWithId: Expense = { ...expenseToAdd, id };
+      const nextExpenses = [newExpenseWithId, ...expenses];
+      setExpenses(nextExpenses);
+      const nextAlerts = recomputeAlerts(nextExpenses);
+      setAlerts(nextAlerts);
+      const { summary } = reconcileSavingsLedger({ userKey, expenses: nextExpenses, now });
+      setSavedSummary(summary);
+      // Trigger background analysis update
+      requestGeminiAnalysis(nextExpenses).then(setLastAnalysis).catch(() => {});
+      toast.success('Expense added', {
+        description: `${newExpenseWithId.description} - ₹${newExpenseWithId.amount.toFixed(0)} (${newExpenseWithId.category})`,
+      });
+    } catch (error) {
+      console.error('Failed to add expense:', error);
+      toast.error('Failed to add expense', { description: 'Please try again.' });
+    } finally {
+      // Hide loading after processing completes
+      setIsGlobalLoading(false);
+    }
   };
 
   const handleDismissAlert = (id: string) => {
@@ -216,25 +224,81 @@ const Index = () => {
     toast('Alert dismissed', { description: 'This habit alert has been removed from the list.' });
   };
 
-  const handleDeleteExpense = (id: string) => {
+  const handleDeleteExpense = async (id: string) => {
     const target = expenses.find((e) => e.id === id);
     if (!target) return;
     if (target.source !== 'MANUAL') return; // guard
-    const next = expenses.filter((e) => e.id !== id);
-    setExpenses(next);
-    const nextAlerts = recomputeAlerts(next);
+
+    try {
+      await deleteExpense(id);
+      const next = expenses.filter((e) => e.id !== id);
+      setExpenses(next);
+      const nextAlerts = recomputeAlerts(next);
+      setAlerts(nextAlerts);
+      const { summary } = reconcileSavingsLedger({ userKey, expenses: next });
+      setSavedSummary(summary);
+      requestGeminiAnalysis(next).then(setLastAnalysis).catch(() => {});
+      toast('Expense deleted', { description: 'Dashboard recalculated.' });
+    } catch (error) {
+      console.error('Failed to delete expense:', error);
+      toast.error('Failed to delete expense', { description: 'Please try again.' });
+    }
+  };
+
+  const handleCSVUploadSuccess = (newExpenses: Expense[]) => {
+    const nextExpenses = [...newExpenses, ...expenses];
+    setExpenses(nextExpenses);
+    const nextAlerts = recomputeAlerts(nextExpenses);
     setAlerts(nextAlerts);
-    const { summary } = reconcileSavingsLedger({ userKey, expenses: next });
+    const { summary } = reconcileSavingsLedger({ userKey, expenses: nextExpenses });
     setSavedSummary(summary);
-    requestGeminiAnalysis(next).then(setLastAnalysis).catch(() => {});
-    toast('Expense deleted', { description: 'Dashboard recalculated.' });
+    requestGeminiAnalysis(nextExpenses).then(setLastAnalysis).catch(() => {});
+    // Hide loading after CSV processing completes
+    setIsGlobalLoading(false);
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
+      {/* Animated background elements */}
+      <div className="fixed top-0 left-0 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
+      <div className="fixed top-0 right-0 w-96 h-96 bg-cyan-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
+      <div className="fixed bottom-0 left-1/2 w-96 h-96 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
+
+      <style>{`
+        @keyframes blob {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          33% { transform: translate(30px, -50px) scale(1.1); }
+          66% { transform: translate(-20px, 20px) scale(0.9); }
+        }
+        .animate-blob {
+          animation: blob 7s infinite;
+        }
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+        .animation-delay-4000 {
+          animation-delay: 4s;
+        }
+      `}</style>
+
+      {/* Global Loading Overlay */}
+      {isGlobalLoading && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+        >
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+            <p className="text-white text-lg font-semibold">Please wait a moment while we process your expenses…</p>
+          </div>
+        </motion.div>
+      )}
+
       <Header alertCount={alerts.length} />
 
-      <main className="container mx-auto px-4 py-6 pb-24">
+      <main className="container mx-auto px-4 py-6 pb-24 relative z-10">
         {/* Stats Grid */}
         <motion.section
           initial={{ opacity: 0 }}
@@ -354,12 +418,20 @@ const Index = () => {
       >
         <Button
           onClick={() => setIsModalOpen(true)}
+          disabled={isGlobalLoading}
           className="rounded-full gradient-primary shadow-glow hover:shadow-xl transition-all px-5 h-12"
         >
           <Plus className="h-5 w-5 mr-2" />
           Add Expense
         </Button>
-        {/* STRICT MODE: Quick Add removed */}
+        <Button
+          onClick={() => setIsCSVOpen(true)}
+          disabled={isGlobalLoading}
+          className="rounded-full gradient-primary shadow-glow hover:shadow-xl transition-all px-5 h-12"
+        >
+          <Upload className="h-5 w-5 mr-2" />
+          Upload CSV
+        </Button>
         <Button
           onClick={() => {
             setIsSavedOpen(true);
@@ -369,7 +441,6 @@ const Index = () => {
           <BadgeCheck className="h-5 w-5 mr-2" />
           Saved
         </Button>
-        {/* Single new UI element: AI Suggestions button */}
         <Button
           onClick={async () => {
             setIsBotOpen((v) => !v);
@@ -399,6 +470,32 @@ const Index = () => {
         onAdd={handleAddExpense}
       />
       <AddSavingModal isOpen={isSavedOpen} onClose={() => setIsSavedOpen(false)} summary={savedSummary} />
+
+      {/* CSV Upload Modal */}
+      {isCSVOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-card rounded-lg p-6 max-w-md w-full mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Upload Bank Statement</h3>
+              <Button variant="ghost" size="sm" onClick={() => setIsCSVOpen(false)}>
+                ✕
+              </Button>
+            </div>
+            <CSVUpload
+              existingExpenses={expenses}
+              onUploadSuccess={(expenses) => {
+                // Close modal immediately
+                setIsCSVOpen(false);
+                // Show loading overlay
+                setIsGlobalLoading(true);
+                // Process the CSV upload
+                handleCSVUploadSuccess(expenses);
+              }}
+              onComplete={() => {}}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Lightweight chat panel (overlay), not a new page/layout */}
       {isBotOpen && (

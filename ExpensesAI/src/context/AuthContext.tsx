@@ -1,92 +1,167 @@
 import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  signInWithPopup,
+  onAuthStateChanged,
+  updateEmail as fbUpdateEmail,
+  updatePassword as fbUpdatePassword,
+  sendPasswordResetEmail as fbSendPasswordResetEmail,
+  User as FirebaseUser,
+} from "firebase/auth";
+import { auth, firebaseReady, googleProvider } from "@/lib/firebase";
 
-type LocalUser = { uid: string; email: string };
+interface LocalUser {
+  uid: string;
+  email: string;
+}
 
 interface AuthContextValue {
   user: LocalUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
-  loginWithGoogle: () => Promise<void>; // no-op placeholder
+  loginWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
+  updateEmail: (newEmail: string) => Promise<void>;
+  updatePassword: (newPassword: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const USERS_KEY = "auth_users";
-const SESSION_KEY = "auth_session";
-
-async function sha256(input: string): Promise<string> {
-  const enc = new TextEncoder().encode(input);
-  const buf = await crypto.subtle.digest("SHA-256", enc);
-  return Array.from(new Uint8Array(buf))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+const firebaseUserToLocalUser = (fbUser: FirebaseUser): LocalUser => ({
+  uid: fbUser.uid,
+  email: fbUser.email || "",
+});
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<LocalUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Set up Firebase auth state listener
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(SESSION_KEY);
-      if (raw) setUser(JSON.parse(raw));
-    } catch {}
-    setLoading(false);
+    if (!firebaseReady) {
+      console.error("Firebase is not initialized. Please check your .env.local configuration.");
+      setLoading(false);
+      return;
+    }
+
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+      if (fbUser) {
+        setUser(firebaseUserToLocalUser(fbUser));
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, []);
 
-  const persistSession = (u: LocalUser | null) => {
-    if (u) localStorage.setItem(SESSION_KEY, JSON.stringify(u));
-    else localStorage.removeItem(SESSION_KEY);
-  };
-
-  const readUsers = (): Record<string, { email: string; passwordHash: string }> => {
+  const signup = async (email: string, password: string) => {
+    if (!firebaseReady) {
+      throw new Error("Firebase is not initialized. Please check your .env.local configuration.");
+    }
     try {
-      return JSON.parse(localStorage.getItem(USERS_KEY) || "{}");
-    } catch {
-      return {};
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      setUser(firebaseUserToLocalUser(userCredential.user));
+    } catch (error: any) {
+      throw new Error(error.message || "Failed to create account");
     }
   };
 
-  const writeUsers = (users: Record<string, { email: string; passwordHash: string }>) => {
-    localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  };
-
-  const signup = async (email: string, password: string) => {
-    const users = readUsers();
-    const key = email.toLowerCase();
-    if (users[key]) throw new Error("Account already exists");
-    const passwordHash = await sha256(password);
-    users[key] = { email, passwordHash };
-    writeUsers(users);
-    const u: LocalUser = { uid: crypto.randomUUID(), email };
-    setUser(u);
-    persistSession(u);
-  };
-
   const login = async (email: string, password: string) => {
-    const users = readUsers();
-    const key = email.toLowerCase();
-    const rec = users[key];
-    if (!rec) throw new Error("Invalid credentials");
-    const passwordHash = await sha256(password);
-    if (rec.passwordHash !== passwordHash) throw new Error("Invalid credentials");
-    const u: LocalUser = { uid: crypto.randomUUID(), email };
-    setUser(u);
-    persistSession(u);
+    if (!firebaseReady) {
+      throw new Error("Firebase is not initialized. Please check your .env.local configuration.");
+    }
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      setUser(firebaseUserToLocalUser(userCredential.user));
+    } catch (error: any) {
+      throw new Error(error.message || "Invalid email or password");
+    }
   };
 
   const loginWithGoogle = async () => {
-    throw new Error("Google sign-in is not available without a backend provider");
+    if (!firebaseReady) {
+      throw new Error("Firebase is not initialized. Please check your .env.local configuration.");
+    }
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      setUser(firebaseUserToLocalUser(result.user));
+    } catch (error: any) {
+      throw new Error(error.message || "Google sign-in failed");
+    }
   };
 
   const logout = async () => {
-    setUser(null);
-    persistSession(null);
+    if (!firebaseReady) {
+      throw new Error("Firebase is not initialized");
+    }
+    try {
+      await signOut(auth);
+      setUser(null);
+    } catch (error: any) {
+      throw new Error(error.message || "Failed to sign out");
+    }
   };
 
-  const value: AuthContextValue = { user, loading, login, signup, loginWithGoogle, logout };
+  const updateEmail = async (newEmail: string) => {
+    if (!firebaseReady) throw new Error("Firebase is not initialized");
+    const current = auth.currentUser;
+    if (!current) throw new Error("No authenticated user");
+    try {
+      await fbUpdateEmail(current, newEmail);
+      setUser((u) => (u ? { ...u, email: newEmail } : u));
+    } catch (error: any) {
+      throw new Error(error.message || "Failed to update email");
+    }
+  };
+
+  const updatePassword = async (newPassword: string) => {
+    if (!firebaseReady) throw new Error("Firebase is not initialized");
+    const current = auth.currentUser;
+    if (!current) throw new Error("No authenticated user");
+    try {
+      await fbUpdatePassword(current, newPassword);
+    } catch (error: any) {
+      throw new Error(error.message || "Failed to update password");
+    }
+  };
+
+  const resetPassword = async (email: string) => {
+    if (!firebaseReady) throw new Error("Firebase is not initialized");
+    try {
+      // Provide a continue URL so the email contains a useful redirect back to the app after reset
+      const actionCodeSettings = {
+        url: typeof window !== "undefined" ? `${window.location.origin}/login` : undefined,
+      } as const;
+
+      await fbSendPasswordResetEmail(auth, email, actionCodeSettings as any);
+      // Log success for local debugging
+      console.info("Password reset email requested for:", email);
+    } catch (error: any) {
+      console.error("Password reset failed", error?.code, error?.message);
+      // Surface a helpful message including Firebase error code when available
+      const code = error?.code ? `${error.code} - ` : "";
+      throw new Error(code + (error?.message || "Failed to send password reset email"));
+    }
+  };
+
+  const value: AuthContextValue = {
+    user,
+    loading,
+    login,
+    signup,
+    loginWithGoogle,
+    logout,
+    updateEmail,
+    updatePassword,
+    resetPassword,
+  };
+
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 

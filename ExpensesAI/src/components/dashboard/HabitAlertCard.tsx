@@ -12,19 +12,19 @@ interface HabitAlertCardProps {
 
 const severityStyles = {
   bad: {
-    container: 'border-l-4 border-l-destructive bg-destructive/5',
-    icon: 'text-destructive',
-    badge: 'bg-destructive text-destructive-foreground',
+    container: 'border-l-4 border-l-red-500 bg-red-500/10 backdrop-blur-md border border-red-400/30',
+    icon: 'text-red-400',
+    badge: 'bg-red-500/30 border border-red-400/30 text-red-200',
   },
   warning: {
-    container: 'border-l-4 border-l-warning bg-warning/5',
-    icon: 'text-warning',
-    badge: 'bg-warning text-warning-foreground',
+    container: 'border-l-4 border-l-orange-500 bg-orange-500/10 backdrop-blur-md border border-orange-400/30',
+    icon: 'text-orange-400',
+    badge: 'bg-orange-500/30 border border-orange-400/30 text-orange-200',
   },
   good: {
-    container: 'border-l-4 border-l-success bg-success/5',
-    icon: 'text-success',
-    badge: 'bg-success text-success-foreground',
+    container: 'border-l-4 border-l-green-500 bg-green-500/10 backdrop-blur-md border border-green-400/30',
+    icon: 'text-green-400',
+    badge: 'bg-green-500/30 border border-green-400/30 text-green-200',
   },
 };
 
@@ -40,7 +40,7 @@ export function HabitAlertCard({ alert, onDismiss, index = 0 }: HabitAlertCardPr
       exit={{ opacity: 0, x: 20 }}
       transition={{ delay: index * 0.1 }}
       className={cn(
-        'relative rounded-xl p-5 shadow-card',
+        'relative rounded-xl p-5 shadow-lg',
         styles.container
       )}
     >
@@ -51,12 +51,12 @@ export function HabitAlertCard({ alert, onDismiss, index = 0 }: HabitAlertCardPr
         
         <div className="flex-1 space-y-3">
           <div className="flex items-start justify-between gap-2">
-            <h3 className="font-semibold text-foreground">{alert.title}</h3>
+            <h3 className="font-semibold text-white">{alert.title}</h3>
             {onDismiss && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 shrink-0 text-muted-foreground hover:text-foreground"
+                className="h-6 w-6 shrink-0 text-gray-400 hover:text-white hover:bg-white/10"
                 onClick={() => onDismiss(alert.id)}
               >
                 <X className="h-4 w-4" />
@@ -64,18 +64,18 @@ export function HabitAlertCard({ alert, onDismiss, index = 0 }: HabitAlertCardPr
             )}
           </div>
           
-          <p className="text-sm text-muted-foreground">{alert.description}</p>
+          <p className="text-sm text-gray-300">{alert.description}</p>
           
           <div className="flex items-center gap-4">
-            <div className={cn('inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium', styles.badge)}>
+            <div className={cn('inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium border', styles.badge)}>
               <BadgeIcon className="h-3 w-3" />
               {alert.severity === 'good' ? 'Healthy trend' : `Save ₹${alert.savingPotential}/month`}
             </div>
           </div>
           
-          <div className="flex items-start gap-2 rounded-lg bg-accent/50 p-3">
-            <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-            <p className="text-sm text-foreground">{alert.suggestion}</p>
+          <div className="flex items-start gap-2 rounded-lg bg-white/5 border border-white/10 p-3">
+            <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-cyan-400" />
+            <p className="text-sm text-gray-300">{alert.suggestion}</p>
           </div>
         </div>
       </div>

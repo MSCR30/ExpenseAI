@@ -1,28 +1,43 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
-const cfg = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string | undefined,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string | undefined,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string | undefined,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID as string | undefined,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string | undefined,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string | undefined,
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
 
-const hasAllEnv = Object.values(cfg).every(Boolean);
+// Check if all required Firebase config values are present
+const hasAllEnv = Object.values(firebaseConfig).every(
+  (value) => value && typeof value === "string" && value.length > 0
+);
 
 let app: ReturnType<typeof initializeApp> | null = null;
-try {
-  if (hasAllEnv) {
-    app = initializeApp(cfg as Required<typeof cfg>);
-  } else {
-    console.warn("Firebase env vars are missing. Auth is disabled until .env is configured.");
+let firebaseReady = false;
+
+if (hasAllEnv) {
+  try {
+    app = initializeApp(firebaseConfig);
+    firebaseReady = true;
+    console.log("✅ Firebase initialized successfully");
+  } catch (e) {
+    console.error("❌ Failed to initialize Firebase app:", e);
+    firebaseReady = false;
   }
-} catch (e) {
-  console.error("Failed to initialize Firebase app:", e);
+} else {
+  console.warn(
+    "⚠️ Firebase environment variables are missing or incomplete. Authentication is disabled.\n" +
+    "Please check your .env.local file has all required Firebase config values."
+  );
 }
 
-export const firebaseReady = !!app;
+// Export Firebase instances
 export const auth = app ? getAuth(app) : (undefined as any);
-export const googleProvider = new GoogleAuthProvider();
+export const db = app ? getFirestore(app) : (undefined as any);
+export const googleProvider = app ? new GoogleAuthProvider() : (undefined as any);
+export { firebaseReady };

@@ -10,7 +10,7 @@ import { cn } from '@/lib/utils';
 interface AddExpenseModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAdd: (expense: { description: string; amount: number; category: Category }) => void;
+  onAdd?: (expense: { description: string; amount: number; category: Category }) => void;
 }
 
 const categories: Category[] = ['food', 'transport', 'shopping', 'entertainment', 'bills', 'subscriptions', 'groceries', 'health', 'other'];
@@ -58,23 +58,40 @@ export function AddExpenseModal({ isOpen, onClose, onAdd }: AddExpenseModalProps
   };
 
   const handleSubmit = () => {
-    if (description && amount && selectedCategory) {
-      const descriptionWithLabel =
-        selectedCategory === 'other' && selectedCategoryLabel
-          ? `${description} [${selectedCategoryLabel}]`
-          : description;
-      onAdd({
-        description: descriptionWithLabel,
-        amount: parseFloat(amount),
-        // Map custom categories to 'other' while preserving label in description
-        category: selectedCategory,
-      });
-      setDescription('');
-      setAmount('');
-      setSelectedCategory(null);
-      setSelectedCategoryLabel(null);
-      onClose();
+    // Validation
+    if (!description || !amount || !selectedCategory) {
+      return;
     }
+
+    const parsedAmount = parseFloat(amount);
+    if (parsedAmount <= 0) {
+      return;
+    }
+
+    const descriptionWithLabel =
+      selectedCategory === 'other' && selectedCategoryLabel
+        ? `${description} [${selectedCategoryLabel}]`
+        : description;
+    
+    const expense = {
+      description: descriptionWithLabel,
+      amount: parsedAmount,
+      category: selectedCategory,
+    };
+
+    // Call the handler
+    if (onAdd) {
+      onAdd(expense);
+    }
+
+    // Clear form state
+    setDescription('');
+    setAmount('');
+    setSelectedCategory(null);
+    setSelectedCategoryLabel(null);
+    
+    // Close modal
+    onClose();
   };
 
   return (
