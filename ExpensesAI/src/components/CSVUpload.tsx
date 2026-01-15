@@ -2,12 +2,12 @@ import React, { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Upload, FileText, AlertCircle, CheckCircle } from 'lucide-react';
 import { toast } from '@/components/ui/sonner';
-import { parseCSV, bankRecordToExpense, addExpenses } from '@/services/database';
+import { parseCSV, bankRecordToExpense } from '@/services/database';
 import { classifyExpense } from '@/services/ai';
 import type { Expense } from '@/lib/mockData';
 
 interface CSVUploadProps {
-  onUploadSuccess: (expenses: Expense[]) => void;
+  onUploadSuccess: (expenses: Omit<Expense, 'id'>[]) => void;
   existingExpenses?: Expense[];
   onComplete?: () => void;
 }
@@ -42,41 +42,36 @@ export const CSVUpload: React.FC<CSVUploadProps> = ({ onUploadSuccess, existingE
         throw new Error('No valid records found in CSV');
       }
 
-      // Ignore credit transactions (only import debits)
-      const debitRecords = bankRecords.filter(r => r.type === 'debit');
-      if (debitRecords.length === 0) {
-        throw new Error('No debit transactions found in CSV');
-      }
-
-      // Convert to expenses and classify them using provided existing expenses
+      // Single-pass processing: filter debits and convert to expenses in one loop
       const expensesToAdd: Omit<Expense, 'id'>[] = [];
       const existing = existingExpenses ?? [];
 
-      for (const record of debitRecords) {
+      for (const record of bankRecords) {
+        // Skip credit transactions
+        if (record.type !== 'debit') continue;
+        
+        // Convert and classify in single pass
         const baseExpense = bankRecordToExpense(record);
         const { flags } = classifyExpense(baseExpense as Expense, existing);
-        const expense: Omit<Expense, 'id'> = {
+        expensesToAdd.push({
           ...baseExpense,
           isImpulse: flags.impulse,
-        };
-        expensesToAdd.push(expense);
+        });
       }
 
-      // Add to database
-      const ids = await addExpenses(expensesToAdd);
+      if (expensesToAdd.length === 0) {
+        throw new Error('No debit transactions found in CSV');
+      }
 
-      // Create full Expense objects with IDs
-      const newExpenses: Expense[] = expensesToAdd.map((exp, index) => ({
-        ...exp,
-        id: ids[index],
-      }));
-
+      // Do not perform DB writes here to keep UI responsive.
+      // Return parsed/typed expenses (without IDs) to the caller so the parent can
+      // perform an optimistic UI update and batch the DB write in background.
       setUploadStatus('success');
-      toast.success('CSV uploaded successfully', {
-        description: `Added ${newExpenses.length} expense${newExpenses.length === 1 ? '' : 's'} from bank statement.`
+      toast.success('CSV parsed successfully', {
+        description: `Found ${expensesToAdd.length} debit transaction${expensesToAdd.length === 1 ? '' : 's'} in the CSV.`
       });
 
-      onUploadSuccess(newExpenses);
+      onUploadSuccess(expensesToAdd);
 
     } catch (error) {
       setUploadStatus('error');

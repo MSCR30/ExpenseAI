@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Plus, Wallet, TrendingDown, AlertTriangle, Target, BadgeCheck, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -31,7 +31,7 @@ import {
   type AnalysisResult,
 } from '@/services/ai';
 import { useAuth } from '@/context/AuthContext';
-import { getExpenses, addExpense, deleteExpense } from '@/services/database';
+import { getExpenses, addExpenses, deleteExpense } from '@/services/database';
 
 const Index = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -107,15 +107,15 @@ const Index = () => {
     })();
   }, [expenses]);
 
-  const totalSpent = expenses.reduce((sum, exp) => sum + exp.amount, 0);
-  const impulseSpending = expenses.filter(e => e.isImpulse).reduce((sum, exp) => sum + exp.amount, 0);
-  const badAlerts = alerts.filter((a) => a.severity === 'bad');
-  const potentialSavings = badAlerts.reduce((sum, alert) => sum + alert.savingPotential, 0);
+  const totalSpent = useMemo(() => expenses.reduce((sum, exp) => sum + exp.amount, 0), [expenses]);
+  const impulseSpending = useMemo(() => expenses.filter(e => e.isImpulse).reduce((sum, exp) => sum + exp.amount, 0), [expenses]);
+  const badAlerts = useMemo(() => alerts.filter((a) => a.severity === 'bad'), [alerts]);
+  const potentialSavings = useMemo(() => badAlerts.reduce((sum, alert) => sum + alert.savingPotential, 0), [badAlerts]);
   const [applySavings, setApplySavings] = useState(false);
-  const displayedTotal = Math.max(0, totalSpent - (applySavings ? potentialSavings : 0));
-  const savingsPct = totalSpent > 0 ? ((applySavings ? potentialSavings : 0) / totalSpent) * 100 : 0;
+  const displayedTotal = useMemo(() => Math.max(0, totalSpent - (applySavings ? potentialSavings : 0)), [totalSpent, potentialSavings, applySavings]);
+  const savingsPct = useMemo(() => totalSpent > 0 ? ((applySavings ? potentialSavings : 0) / totalSpent) * 100 : 0, [totalSpent, potentialSavings, applySavings]);
 
-  const spendingByCategory: SpendingByCategory[] = (() => {
+  const spendingByCategory: SpendingByCategory[] = useMemo(() => {
     const totals: Record<Category, number> = {
       food: 0,
       transport: 0,
@@ -139,9 +139,9 @@ const Index = () => {
         percentage: total ? parseFloat(((totals[cat] / total) * 100).toFixed(1)) : 0,
         color: categoryColors[cat],
       }));
-  })();
+  }, [expenses]);
 
-  const weeklyData = (() => {
+  const weeklyData = useMemo(() => {
     const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
     const totals: Record<typeof days[number], number> = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 };
     expenses.forEach((e) => {
@@ -151,12 +151,11 @@ const Index = () => {
     });
     const order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
     return order.map((day) => ({ day, amount: totals[day] }));
-  })();
+  }, [expenses]);
 
-  const handleAddExpense = async (newExpense: { description: string; amount: number; category: Category }) => {
-    // Close modal immediately
+  const handleAddExpense = useCallback(async (newExpense: { description: string; amount: number; category: Category }) => {
+    // Close modal immediately and show loading briefly
     setIsModalOpen(false);
-    // Show loading overlay
     setIsGlobalLoading(true);
 
     const now = new Date();
@@ -196,28 +195,36 @@ const Index = () => {
     const { flags } = classifyExpense(expenseBase as Expense, expenses);
     const expenseToAdd = { ...expenseBase, isImpulse: flags.impulse };
 
-    try {
-      const id = await addExpense(expenseToAdd);
-      const newExpenseWithId: Expense = { ...expenseToAdd, id };
-      const nextExpenses = [newExpenseWithId, ...expenses];
-      setExpenses(nextExpenses);
-      const nextAlerts = recomputeAlerts(nextExpenses);
+    // Optimistic UI update: create a temporary id and append immediately
+    const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const tempExpense: Expense = { ...expenseToAdd, id: tempId };
+
+    setExpenses((prev) => {
+      const next = [tempExpense, ...prev];
+      const nextAlerts = recomputeAlerts(next);
       setAlerts(nextAlerts);
-      const { summary } = reconcileSavingsLedger({ userKey, expenses: nextExpenses, now });
+      const { summary } = reconcileSavingsLedger({ userKey, expenses: next, now });
       setSavedSummary(summary);
-      // Trigger background analysis update
-      requestGeminiAnalysis(nextExpenses).then(setLastAnalysis).catch(() => {});
-      toast.success('Expense added', {
-        description: `${newExpenseWithId.description} - ₹${newExpenseWithId.amount.toFixed(0)} (${newExpenseWithId.category})`,
-      });
-    } catch (error) {
-      console.error('Failed to add expense:', error);
-      toast.error('Failed to add expense', { description: 'Please try again.' });
-    } finally {
-      // Hide loading after processing completes
-      setIsGlobalLoading(false);
-    }
-  };
+      // Trigger background analysis update (non-blocking)
+      requestGeminiAnalysis(next).then(setLastAnalysis).catch(() => {});
+      return next;
+    });
+
+    // Hide loading now to keep UI responsive; persist in background
+    setIsGlobalLoading(false);
+
+    (async () => {
+      try {
+        const ids = await addExpenses([expenseToAdd]);
+        const realId = ids[0];
+        // Replace temp id with real id
+        setExpenses((prev) => prev.map((e) => (e.id === tempId ? { ...e, id: realId } : e)));
+      } catch (error) {
+        console.error('Failed to persist expense:', error);
+        toast.error('Failed to persist expense to server. It may be retried.', { description: 'Check network or try again.' });
+      }
+    })();
+  }, [applySavings, badAlerts, userKey, expenses]);
 
   const handleDismissAlert = (id: string) => {
     setAlerts(alerts.filter(a => a.id !== id));
@@ -245,17 +252,49 @@ const Index = () => {
     }
   };
 
-  const handleCSVUploadSuccess = (newExpenses: Expense[]) => {
-    const nextExpenses = [...newExpenses, ...expenses];
-    setExpenses(nextExpenses);
-    const nextAlerts = recomputeAlerts(nextExpenses);
-    setAlerts(nextAlerts);
-    const { summary } = reconcileSavingsLedger({ userKey, expenses: nextExpenses });
-    setSavedSummary(summary);
-    requestGeminiAnalysis(nextExpenses).then(setLastAnalysis).catch(() => {});
-    // Hide loading after CSV processing completes
+  const handleCSVUploadSuccess = useCallback((parsedExpenses: Omit<Expense, 'id'>[]) => {
+    // Create temp IDs and append in a single batch update
+    const tempExpenses: Expense[] = parsedExpenses.map((exp) => ({
+      ...exp,
+      id: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    }));
+
+    setExpenses((prev) => {
+      const next = [...tempExpenses, ...prev];
+      const nextAlerts = recomputeAlerts(next);
+      setAlerts(nextAlerts);
+      const { summary } = reconcileSavingsLedger({ userKey, expenses: next });
+      setSavedSummary(summary);
+      // Trigger background analysis update (non-blocking)
+      requestGeminiAnalysis(next).then(setLastAnalysis).catch(() => {});
+      return next;
+    });
+
+    // Hide loading immediately after optimistic update
     setIsGlobalLoading(false);
-  };
+
+    // Persist to backend in background and patch real IDs when available
+    (async () => {
+      try {
+        const ids = await addExpenses(parsedExpenses);
+        // Patch real IDs into state, preserving order
+        setExpenses((prev) => {
+          // Map: for each temp expense in order, replace the first matching temp id
+          const updated = [...prev];
+          let idIndex = 0;
+          for (let i = 0; i < updated.length && idIndex < ids.length; i++) {
+            if (typeof updated[i].id === 'string' && updated[i].id.startsWith('tmp-')) {
+              updated[i] = { ...updated[i], id: ids[idIndex++] };
+            }
+          }
+          return updated;
+        });
+      } catch (error) {
+        console.error('Failed to persist CSV expenses:', error);
+        toast.error('Failed to persist CSV to server. Items may be retried.', { description: 'Check network or try again.' });
+      }
+    })();
+  }, [userKey]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 relative overflow-hidden">
